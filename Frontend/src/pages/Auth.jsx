@@ -1,31 +1,49 @@
 // src/pages/Auth.jsx
 import React, { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { gsap } from "gsap";
 import ThemeInput from "../components/ThemeInput";
 import AyurvedaButton from "../components/AyurvedaButton";
-import ExtraButton from "../components/ExtraButton";
 import loginBg from "../assets/login.jpg";
 import SignupBg from "../assets/Signup.jpg";
+import axios from "axios";
 
 export default function Auth() {
   const navigate = useNavigate();
-  const [isLogin, setIsLogin] = useState(true);
+  const [currentView, setCurrentView] = useState("login"); // login, signup, otp, forgotPassword, resetPassword
   const imageRef = useRef(null);
   const formRef = useRef(null);
+  const inputsRef = useRef([]);
 
   // controlled fields
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
   const [error, setError] = useState("");
+  const [info, setInfo] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // OTP specific states
+  const [otpValues, setOtpValues] = useState(["", "", "", "", "", ""]);
+  const [verifying, setVerifying] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
+
+  const API = "http://localhost:5001/api/auth";
+
+  // GSAP animations
   useEffect(() => {
     const ctx = gsap.context(() => {
       gsap.set([formRef.current, imageRef.current], { y: 8, opacity: 0 });
       const tl = gsap.timeline();
-      tl.to([formRef.current, imageRef.current], { y: 0, opacity: 1, duration: 0.5, stagger: 0.06 });
+      tl.to([formRef.current, imageRef.current], {
+        y: 0,
+        opacity: 1,
+        duration: 0.5,
+        stagger: 0.06,
+      });
       return () => tl.kill();
     }, [formRef, imageRef]);
 
@@ -34,131 +52,609 @@ export default function Auth() {
 
   useEffect(() => {
     const d = 0.65;
+    const isLogin = currentView === "login";
     if (isLogin) {
-      gsap.to(formRef.current, { xPercent: 0, duration: d, ease: "power3.inOut", zIndex: 30 });
-      gsap.to(imageRef.current, { xPercent: 0, duration: d, ease: "power3.inOut", zIndex: 20 });
+      gsap.to(formRef.current, {
+        xPercent: 0,
+        duration: d,
+        ease: "power3.inOut",
+        zIndex: 30,
+      });
+      gsap.to(imageRef.current, {
+        xPercent: 0,
+        duration: d,
+        ease: "power3.inOut",
+        zIndex: 20,
+      });
     } else {
-      gsap.to(formRef.current, { xPercent: 100, duration: d, ease: "power3.inOut", zIndex: 20 });
-      gsap.to(imageRef.current, { xPercent: -100, duration: d, ease: "power3.inOut", zIndex: 30 });
+      gsap.to(formRef.current, {
+        xPercent: 100,
+        duration: d,
+        ease: "power3.inOut",
+        zIndex: 20,
+      });
+      gsap.to(imageRef.current, {
+        xPercent: -100,
+        duration: d,
+        ease: "power3.inOut",
+        zIndex: 30,
+      });
     }
-  }, [isLogin]);
+  }, [currentView]);
 
-  const currentBg = isLogin ? loginBg : SignupBg;
+  // Cooldown timer for resend OTP
+  useEffect(() => {
+    if (cooldown > 0) {
+      const timer = setTimeout(() => setCooldown(cooldown - 1), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [cooldown]);
 
+  // Auto-focus first OTP input when OTP view is active
+  useEffect(() => {
+    if (currentView === "otp") {
+      setTimeout(() => inputsRef.current[0]?.focus(), 100);
+    }
+  }, [currentView]);
+
+  const currentBg = currentView === "login" ? loginBg : SignupBg;
+
+  // Clear form data
+  const clearForm = () => {
+    setName("");
+    setEmail("");
+    setPassword("");
+    setConfirmPassword("");
+    setNewPassword("");
+    setError("");
+    setInfo("");
+    setOtpValues(["", "", "", "", "", ""]);
+  };
+
+  // Handle view changes
+  const switchView = (view) => {
+    clearForm();
+    setCurrentView(view);
+  };
+
+  // OTP handling functions
+  const handleOtpChange = (index, value) => {
+    if (!/^\d*$/.test(value)) return;
+    
+    const newOtp = [...otpValues];
+    newOtp[index] = value;
+    setOtpValues(newOtp);
+
+    if (value && index < 5) {
+      inputsRef.current[index + 1]?.focus();
+    }
+  };
+
+  const handleOtpPaste = (e) => {
+    e.preventDefault();
+    const pastedData = e.clipboardData.getData("text").replace(/\D/g, "");
+    if (pastedData.length >= 6) {
+      const newOtp = pastedData.slice(0, 6).split("");
+      setOtpValues(newOtp);
+      inputsRef.current[5]?.focus();
+    }
+  };
+
+  // Main form submission handler
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
-    if (!email || !password || (!isLogin && !name)) {
-      setError("Please fill required fields.");
+    setInfo("");
+
+    if (currentView === "login") {
+      await handleLogin();
+    } else if (currentView === "signup") {
+      await handleSignup();
+    } else if (currentView === "otp") {
+      await handleOtpVerification();
+    } else if (currentView === "forgotPassword") {
+      await handleForgotPassword();
+    } else if (currentView === "resetPassword") {
+      await handleResetPassword();
+    }
+  };
+
+  const handleLogin = async () => {
+    if (!email || !password) {
+      setError("Please fill all required fields.");
       return;
     }
 
     setLoading(true);
-
-    // simulate api call
-    setTimeout(() => {
-      const token = "demo-token-" + Date.now();
-      // if signing up, create a profile with provided name
-      const profile = {
-        name: isLogin ? (JSON.parse(localStorage.getItem("ayu_profile") || "{}").name || "John Smith") : name,
-        email,
-        initials:
-          isLogin
-            ? (JSON.parse(localStorage.getItem("ayu_profile") || "{}").initials || "JS")
-            : name
-                .split(" ")
-                .map((p) => p[0] || "")
-                .slice(0, 2)
-                .join("")
-                .toUpperCase(),
-        // optional placeholders — will be enriched in GettingStarted
-        gender: undefined,
-        dob: undefined,
-        height: undefined,
-        weight: undefined,
-        activity: undefined
-      };
+    try {
+      const res = await axios.post(`${API}/signin`, { email, password });
+      const { token, name: userName } = res.data;
 
       localStorage.setItem("ayu_token", token);
-      localStorage.setItem("ayu_profile", JSON.stringify(profile));
-      setLoading(false);
+      localStorage.setItem("ayu_profile", JSON.stringify({ name: userName, email }));
 
-      // ROUTING:
-      // - if user just signed up, go to getting-started to collect profile details
-      // - if user logged in, go to dashboard
-      if (isLogin) {
-        navigate("/dashboard", { replace: true });
-      } else {
-        navigate("/getting-started", { replace: true });
-      }
-    }, 700);
+      navigate("/dashboard", { replace: true });
+    } catch (err) {
+      setError(err.response?.data?.message || "Login failed");
+    } finally {
+      setLoading(false);
+    }
   };
 
+  const handleSignup = async () => {
+    if (!name || !email || !password || !confirmPassword) {
+      setError("Please fill all required fields.");
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await axios.post(`${API}/signup`, { 
+        name, 
+        email, 
+        password, 
+        confirmPassword 
+      });
+      
+      setInfo("Account created! Please verify your email with the OTP sent.");
+      setCooldown(60);
+      setTimeout(() => setCurrentView("otp"), 1500);
+    } catch (err) {
+      setError(err.response?.data?.message || "Signup failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleOtpVerification = async () => {
+    const otpString = otpValues.join("");
+    if (otpString.length !== 6) {
+      setError("Please enter all 6 digits");
+      return;
+    }
+
+    setVerifying(true);
+    try {
+      await axios.post(`${API}/verifyotp`, {
+        email,
+        otp: otpString,
+      });
+
+      setInfo("Email verified successfully!");
+      setTimeout(() => setCurrentView("login"), 1500);
+    } catch (err) {
+      setError(err.response?.data?.message || "Invalid OTP. Please try again.");
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    if (!email) {
+      setError("Please enter your email address.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await axios.post(`${API}/forgotpassword`, { email });
+      setInfo("OTP sent to your email for password reset.");
+      setCooldown(60);
+      setTimeout(() => setCurrentView("resetPassword"), 1500);
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to send reset email");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetPassword = async () => {
+    const otpString = otpValues.join("");
+    if (!email || otpString.length !== 6 || !newPassword || !confirmPassword) {
+      setError("Please fill all required fields.");
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await axios.post(`${API}/resetpassword`, {
+        email,
+        otp: otpString,
+        newPassword,
+        confirmPassword,
+      });
+
+      setInfo("Password reset successfully!");
+      setTimeout(() => setCurrentView("login"), 1500);
+    } catch (err) {
+      setError(err.response?.data?.message || "Password reset failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resendOtp = async () => {
+    if (sending || cooldown > 0) return;
+
+    setSending(true);
+    setError("");
+
+    try {
+      if (currentView === "otp") {
+        // Resend signup OTP
+        await axios.post(`${API}/signup`, { 
+          name, 
+          email, 
+          password, 
+          confirmPassword: password 
+        });
+      } else if (currentView === "resetPassword") {
+        // Resend forgot password OTP
+        await axios.post(`${API}/forgotpassword`, { email });
+      }
+
+      setInfo("New OTP sent to your email");
+      setCooldown(60);
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to resend OTP");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  // Render different form content based on current view
+  const renderFormContent = () => {
+    if (currentView === "otp") {
+      return (
+        <div className="w-full max-w-md bg-white rounded-2xl shadow-lg border p-6">
+          {/* Greeting */}
+          <div className="text-center mb-4">
+            <h2 className="text-2xl font-semibold text-gray-900">
+              {name ? `Hey ${name.split(" ")[0]},` : "Hey there,"}
+            </h2>
+            <p className="text-sm text-gray-600">Check your email — enter the 6-digit code below to finish signing up.</p>
+            {email && <div className="mt-2 text-xs text-gray-500">Code sent to <strong>{email}</strong></div>}
+          </div>
+
+          {/* Info / error */}
+          {info && <div className="text-sm text-green-700 mb-3 text-center">{info}</div>}
+          {error && <div className="text-sm text-red-600 mb-3 text-center">{error}</div>}
+
+          {/* OTP inputs */}
+          <form onSubmit={handleSubmit} onPaste={handleOtpPaste}>
+            <div className="flex justify-center gap-2 mb-4">
+              {otpValues.map((val, i) => (
+                <input
+                  key={i}
+                  ref={(el) => (inputsRef.current[i] = el)}
+                  value={val}
+                  onChange={(e) => handleOtpChange(i, e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Backspace" && !otpValues[i] && i > 0) inputsRef.current[i - 1]?.focus();
+                    else if (e.key === "ArrowLeft" && i > 0) inputsRef.current[i - 1]?.focus();
+                    else if (e.key === "ArrowRight" && i < 5) inputsRef.current[i + 1]?.focus();
+                  }}
+                  className="w-12 h-12 text-center border rounded-md text-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={1}
+                  aria-label={`OTP digit ${i + 1}`}
+                />
+              ))}
+            </div>
+
+            <div className="flex gap-3">
+              <AyurvedaButton type="submit" className="flex-1" disabled={verifying}>
+                {verifying ? "Verifying..." : "Verify"}
+              </AyurvedaButton>
+            </div>
+
+            <div className="mt-3 text-center text-sm">
+              {cooldown > 0 ? (
+                <>Didn't get OTP? Resend available in <strong>{cooldown}s</strong>.</>
+              ) : (
+                <button
+                  type="button"
+                  onClick={resendOtp}
+                  className="text-green-700 underline"
+                  disabled={sending}
+                >
+                  {sending ? "Sending..." : "Didn't get OTP? Resend"}
+                </button>
+              )}
+            </div>
+          </form>
+
+          <div className="mt-4 text-center text-xs text-gray-500">
+            {cooldown > 0 ? (
+              <>Check spam if you don't see the email.</>
+            ) : (
+              <>If you still don't receive it, try again or contact support.</>
+            )}
+          </div>
+
+          <div className="mt-4 text-center text-sm">
+            <button 
+              onClick={() => switchView("signup")} 
+              className="text-green-700 underline"
+            >
+              Go back to signup
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    if (currentView === "resetPassword") {
+      return (
+        <div className="w-full max-w-md">
+          <div className="flex items-start justify-between mb-6 gap-4">
+            <div>
+              <h2 className="text-3xl md:text-4xl font-extrabold text-gray-900">
+                Reset Password
+              </h2>
+              <p className="mt-1 text-sm text-gray-600">
+                Enter the OTP sent to your email and your new password.
+              </p>
+            </div>
+          </div>
+
+          <form className="space-y-4" onSubmit={handleSubmit} onPaste={handleOtpPaste}>
+            {/* OTP inputs */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Enter 6-digit OTP
+              </label>
+              <div className="flex justify-center gap-2 mb-4">
+                {otpValues.map((val, i) => (
+                  <input
+                    key={i}
+                    ref={(el) => (inputsRef.current[i] = el)}
+                    value={val}
+                    onChange={(e) => handleOtpChange(i, e.target.value)}
+                    className="w-12 h-12 text-center border rounded-md text-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={1}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <ThemeInput
+              name="newPassword"
+              type="password"
+              placeholder="New password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+            />
+
+            <ThemeInput
+              name="confirmPassword"
+              type="password"
+              placeholder="Confirm new password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+            />
+
+            {error && <div className="text-sm text-red-500">{error}</div>}
+            {info && <div className="text-sm text-green-600">{info}</div>}
+
+            <div className="flex flex-col gap-3 mt-2">
+              <AyurvedaButton
+                type="submit"
+                className="w-full"
+                disabled={loading}
+              >
+                {loading ? "Resetting..." : "Reset Password"}
+              </AyurvedaButton>
+            </div>
+
+            <div className="mt-3 text-center text-sm">
+              {cooldown > 0 ? (
+                <>Didn't get OTP? Resend available in <strong>{cooldown}s</strong>.</>
+              ) : (
+                <button
+                  type="button"
+                  onClick={resendOtp}
+                  className="text-green-700 underline"
+                  disabled={sending}
+                >
+                  {sending ? "Sending..." : "Resend OTP"}
+                </button>
+              )}
+            </div>
+
+            <div className="text-center text-sm text-gray-600 mt-3">
+              Remember your password?{" "}
+              <button
+                type="button"
+                onClick={() => switchView("login")}
+                className="text-sm font-medium text-green-700 underline"
+              >
+                Sign in
+              </button>
+            </div>
+          </form>
+        </div>
+      );
+    }
+
+    // Default form content for login/signup/forgotPassword
+    return (
+      <div className="w-full max-w-md">
+        <div className="flex items-start justify-between mb-6 gap-4">
+          <div>
+            <h2 className="text-3xl md:text-4xl font-extrabold text-gray-900">
+              {currentView === "login" ? "Welcome back" : 
+               currentView === "signup" ? "Create an account" : 
+               "Forgot Password"}
+            </h2>
+            <p className="mt-1 text-sm text-gray-600">
+              {currentView === "login" 
+                ? "Sign in to manage your treatments, bookings and follow-ups."
+                : currentView === "signup" 
+                ? "Create an account to save your plans and personalized programs."
+                : "Enter your email address to receive a password reset OTP."}
+            </p>
+          </div>
+        </div>
+
+        <form className="space-y-4" onSubmit={handleSubmit} noValidate>
+          {currentView === "signup" && (
+            <ThemeInput
+              name="name"
+              placeholder="Full name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          )}
+
+          <ThemeInput
+            name="email"
+            type="email"
+            placeholder="you@example.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+
+          {(currentView === "login" || currentView === "signup") && (
+            <ThemeInput
+              name="password"
+              type="password"
+              placeholder="Your password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          )}
+
+          {currentView === "signup" && (
+            <ThemeInput
+              name="confirmPassword"
+              type="password"
+              placeholder="Confirm password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+            />
+          )}
+
+          {error && <div className="text-sm text-red-500">{error}</div>}
+          {info && <div className="text-sm text-green-600">{info}</div>}
+
+          <div className="flex flex-col gap-3 mt-2">
+            <AyurvedaButton
+              type="submit"
+              className="w-full"
+              disabled={loading}
+            >
+              {loading
+                ? currentView === "login" ? "Signing in..." : 
+                  currentView === "signup" ? "Creating..." : "Sending..."
+                : currentView === "login" ? "Sign in" : 
+                  currentView === "signup" ? "Create account" : "Send Reset OTP"}
+            </AyurvedaButton>
+          </div>
+
+          {currentView === "login" && (
+            <div className="text-center text-sm text-gray-600 mt-2">
+              <button
+                type="button"
+                onClick={() => switchView("forgotPassword")}
+                className="text-green-700 underline"
+              >
+                Forgot your password?
+              </button>
+            </div>
+          )}
+
+          <div className="text-center text-sm text-gray-600 mt-3">
+            {currentView === "login" ? "Don't have an account?" : 
+             currentView === "signup" ? "Already have an account?" : 
+             "Remember your password?"}{" "}
+            <button
+              type="button"
+              onClick={() => switchView(currentView === "login" ? "signup" : "login")}
+              className="text-sm font-medium text-green-700 underline"
+            >
+              {currentView === "login" ? "Sign up" : 
+               currentView === "signup" ? "Log in" : "Sign in"}
+            </button>
+          </div>
+        </form>
+      </div>
+    );
+  };
+
+  if (currentView === "otp") {
+    return (
+      <main className="min-h-screen bg-[#f6faf5] flex items-center justify-center p-6">
+        {renderFormContent()}
+      </main>
+    );
+  }
+
   return (
-    <main className="min-h-screen flex items-center justify-center bg-[#f6faf5] text-gray-900" style={{ padding: 28 }}>
-      <div className="w-full max-w-6xl rounded-2xl shadow-xl overflow-hidden bg-white" style={{ border: "1px solid #eef3ec" }}>
+    <main
+      className="min-h-screen flex items-center justify-center bg-[#f6faf5] text-gray-900"
+      style={{ padding: 28 }}
+    >
+      <div
+        className="w-full max-w-6xl rounded-2xl shadow-xl overflow-hidden bg-white"
+        style={{ border: "1px solid #eef3ec" }}
+      >
         <div className="grid grid-cols-1 md:grid-cols-2">
           {/* FORM PANEL */}
-          <section ref={formRef} className="p-8 md:p-12 flex items-center" style={{ minHeight: 560, background: "linear-gradient(180deg,#ffffff, #fbfdf8)" }}>
-            <div className="w-full max-w-md">
-              <div className="flex items-start justify-between mb-6 gap-4">
-                <div>
-                  <h2 className="text-3xl md:text-4xl font-extrabold text-gray-900">{isLogin ? "Welcome back" : "Create an account"}</h2>
-                  <p className="mt-1 text-sm text-gray-600">{isLogin ? "Sign in to manage your treatments, bookings and follow-ups." : "Create an account to save your plans and personalized programs."}</p>
-                </div>
-
-            
-              </div>
-
-              <form className="space-y-4" onSubmit={handleSubmit} noValidate>
-                {!isLogin && <ThemeInput name="name" placeholder="Full name" value={name} onChange={(e) => setName(e.target.value)} />}
-
-                <ThemeInput name="email" type="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} />
-
-                <ThemeInput name="password" type="password" placeholder="Your password" value={password} onChange={(e) => setPassword(e.target.value)} />
-
-                {error && <div className="text-sm text-red-500">{error}</div>}
-
-                <div className="flex flex-col gap-3 mt-2">
-                  <AyurvedaButton type="submit" className="w-full" style={{ display: "inline-flex", justifyContent: "center" }}>
-                    {loading ? (isLogin ? "Signing in..." : "Creating...") : isLogin ? "Sign in" : "Create account"}
-                  </AyurvedaButton>
-
-                  <button type="button" onClick={() => console.log("Google auth (mock)")} className="w-full inline-flex items-center justify-center gap-3 p-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow-md" style={{ boxShadow: "0 1px 6px rgba(16,24,40,0.04)" }}>
-                    <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden>
-                      <path fill="#FFC107" d="M43.6 20.2H42V20H24v8h11.3C34.9 32.3 30 35 24 35c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l6-6C34.6 3.9 29.6 2 24 2 12.3 2 3 11.3 3 23s9.3 21 21 21c11 0 20-8 21-19.8 0-1 .1-1.6.1-1.7z"/>
-                      <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 15.2 19 12 24 12c3.1 0 5.9 1.2 8 3.1l6-6C34.6 3.9 29.6 2 24 2 16.4 2 9.7 6.4 6.3 14.7z"/>
-                      <path fill="#4CAF50" d="M24 46c6.6 0 12-2.6 16.3-7l-7.6-6.3C29.1 36.3 26.7 37 24 37c-6 0-10.9-2.7-14.2-6.8L5.9 35.4C9.2 40.8 15.3 46 24 46z"/>
-                      <path fill="#1976D2" d="M43.6 20.2H42V20H24v8h11.3c-1.1 2.9-3.1 5.3-5.7 7.1l7.6 6.3C41.2 36.9 44 29.4 44 23c0-1-.1-1.6-.4-2.8z"/>
-                    </svg>
-                    <span className="text-gray-700 font-medium">{isLogin ? "Sign in with Google" : "Sign up with Google"}</span>
-                  </button>
-                </div>
-
-                <div className="text-center text-sm text-gray-600 mt-3">
-                  {isLogin ? "Don't have an account?" : "Already have an account?"}{" "}
-                  <button type="button" onClick={() => setIsLogin((s) => !s)} className="text-sm font-medium text-green-700 underline">
-                    {isLogin ? "Sign up" : "Log in"}
-                  </button>
-                </div>
-              </form>
-            </div>
+          <section
+            ref={formRef}
+            className="p-8 md:p-12 flex items-center"
+            style={{
+              minHeight: 560,
+              background: "linear-gradient(180deg,#ffffff, #fbfdf8)",
+            }}
+          >
+            {renderFormContent()}
           </section>
 
           {/* IMAGE PANEL */}
-          <section ref={imageRef} className="relative p-6 md:p-8 flex flex-col justify-between" style={{ minHeight: 560, backgroundImage: `linear-gradient(180deg, rgba(58,125,68,0.06), rgba(58,125,68,0.02)), url(${currentBg})`, backgroundSize: "cover", backgroundPosition: "center" }}>
-            <div className="flex justify-end">
-            </div>
+          <section
+            ref={imageRef}
+            className="relative p-6 md:p-8 flex flex-col justify-between"
+            style={{
+              minHeight: 560,
+              backgroundImage: `linear-gradient(180deg, rgba(58,125,68,0.06), rgba(58,125,68,0.02)), url(${currentBg})`,
+              backgroundSize: "cover",
+              backgroundPosition: "center",
+            }}
+          >
+            <div className="flex justify-end"></div>
 
             <div className="flex-1 flex items-center justify-center mt-4">
               <div className="w-full max-w-md rounded-xl overflow-hidden bg-white/80 border border-gray-100 shadow">
-                <img src={currentBg} alt="Promotional media" className="w-full h-96 object-cover" />
+                <img
+                  src={currentBg}
+                  alt="Promotional media"
+                  className="w-full h-96 object-cover"
+                />
               </div>
             </div>
 
             <div className="mt-6">
-              <h3 className="text-lg font-semibold text-gray-900">Capturing Moments, Creating Memories</h3>
-              <p className="mt-2 text-sm text-gray-600">A calm, balanced aesthetic blended with Ayurveda-inspired greens.</p>
+              <h3 className="text-lg font-semibold text-gray-900">
+                Capturing Moments, Creating Memories
+              </h3>
+              <p className="mt-2 text-sm text-gray-600">
+                A calm, balanced aesthetic blended with Ayurveda-inspired greens.
+              </p>
             </div>
           </section>
         </div>
