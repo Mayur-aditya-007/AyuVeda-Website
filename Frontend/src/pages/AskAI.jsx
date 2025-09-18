@@ -4,7 +4,7 @@ import Sidebar from "../components/Sidebar";
 import TopBar from "../components/TopBar";
 import ChatInput from "../components/ChatInput";
 import AyurvedaButton from "../components/AyurvedaButton";
-
+import axios from "axios";
 /**
  * AskAi (center chat + right conversation list)
  * - Uses ChatInput (frontend STT) for speech-to-text
@@ -41,15 +41,25 @@ export default function AskAi() {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  function handleSend(text) {
+  async function handleSend(text) {
     if (!text || !text.trim()) return;
+  
+    // Update messages with the user's input
     setMessages((m) => [...m, { id: Date.now(), role: "user", text }]);
     setInputText("");
-
-    // mock AI reply — replace with real API later
-    setTimeout(() => {
-      setMessages((m) => [...m, { id: Date.now() + 1, role: "ai", text: `Demo reply for: "${text}"` }]);
-    }, 700 + Math.random() * 600);
+  
+    try {
+      // Make a POST request to the backend chat endpoint
+      const response = await axios.post("http://localhost:5001/api/auth/chat", { message: text });
+  
+      // Update messages with the AI's reply
+      setMessages((m) => [...m, { id: Date.now(), role: "ai", text: response.data.reply }]);
+    } catch (error) {
+      console.error("Error fetching AI reply:", error);
+  
+      // Handle errors gracefully by showing an error message in the chat
+      setMessages((m) => [...m, { id: Date.now(), role: "ai", text: "Sorry, I couldn't process your request. Please try again later." }]);
+    }
   }
 
   function handleCapture({ dataUrl, blob }) {

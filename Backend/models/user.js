@@ -1,7 +1,7 @@
-// Db Schema
 const mongoose = require("mongoose");
 
 const UserSchema = new mongoose.Schema({
+  // Basic Account Info
   name: {
     type: String,
     required: true,
@@ -15,6 +15,8 @@ const UserSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+
+  // Verification & Security
   isVerified: {
     type: Boolean,
     default: false,
@@ -26,7 +28,7 @@ const UserSchema = new mongoose.Schema({
     type: Date,
   },
 
-  // ✅ New fields
+  // Personal / Physical Information
   height: {
     type: Number, // in cm
   },
@@ -35,10 +37,16 @@ const UserSchema = new mongoose.Schema({
   },
   gender: {
     type: String,
-    enum: ["Male", "Female", "Other"], // restrict values
+    enum: ["Male", "Female", "Other"],
   },
   dob: {
     type: Date,
+  },
+
+  
+  profilePicture: {
+    type: String, 
+    default: "",  
   },
 });
 

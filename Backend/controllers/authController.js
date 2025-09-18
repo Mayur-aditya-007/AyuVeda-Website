@@ -5,26 +5,42 @@ const User = require("../models/user");
 
 
 // ✅ Update profile
+
+
+// controllers/userController.js
+
+
 exports.updateProfile = async (req, res) => {
+  console.log("updateProfile hit with params:", req.params, "body:", req.body);
+
   try {
     const { id } = req.params;
-    const { height, weight, gender, dob } = req.body;
 
-    const user = await User.findByIdAndUpdate(
-      id,
-      { height, weight, gender, dob },
+    const updatedUser = await User.findByIdAndUpdate(
+      id, // find by MongoDB _id
+      {
+        gender: req.body.gender,
+        dob: req.body.dob,
+        height: req.body.height, // use the same names from frontend
+        weight: req.body.weight,
+        // activity: req.body.activity,
+        // profilePicture: req.body.profilePic,
+      },
       { new: true }
     );
 
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
+    if (!updatedUser) {
+      return res.status(404).json({ success: false, message: "User not found" });
     }
 
-    res.json({ message: "Profile updated successfully", user });
+    res.json({ success: true, user: updatedUser });
   } catch (err) {
-    res.status(500).json({ message: "Error updating profile", error: err.message });
+    console.error(err);
+    res.status(500).json({ success: false, message: err.message });
   }
 };
+
+
 
 
 
@@ -89,6 +105,7 @@ exports.signin = async (req, res) => {
   try {
     const user = await User.findOne({ email });
     if (!user) return res.status(404).json({ message: "User not Found" });
+
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch)
       return res.status(400).json({ message: "Invalid Credentials" });
@@ -99,8 +116,21 @@ exports.signin = async (req, res) => {
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
       expiresIn: "1h",
     });
-    res.status(200).json({ token, name: user.name });
+
+    res.status(200).json({
+      token,
+      user: {
+        name: user.name,
+        email: user.email,
+        dob: user.dob,
+        gender: user.gender,
+        height: user.height,
+        weight: user.weight,
+        profilePicture: user.profilePicture || "",
+      },
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
+

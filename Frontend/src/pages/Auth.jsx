@@ -10,7 +10,7 @@ import axios from "axios";
 
 export default function Auth() {
   const navigate = useNavigate();
-  const [currentView, setCurrentView] = useState("login"); // login, signup, otp, forgotPassword, resetPassword
+  const [currentView, setCurrentView] = useState("login"); // login, signup, otp, forgotPassword, resetPassword, gettingStarted
   const imageRef = useRef(null);
   const formRef = useRef(null);
   const inputsRef = useRef([]);
@@ -30,6 +30,16 @@ export default function Auth() {
   const [verifying, setVerifying] = useState(false);
   const [sending, setSending] = useState(false);
   const [cooldown, setCooldown] = useState(0);
+
+  // Getting Started form states
+  const [gettingStartedForm, setGettingStartedForm] = useState({
+    name: "",
+    gender: "",
+    dob: "",
+    height: "",
+    weight: "",
+    activity: "",
+  });
 
   const API = "http://localhost:5001/api/auth";
 
@@ -97,6 +107,13 @@ export default function Auth() {
     }
   }, [currentView]);
 
+  // Set name in getting started form when available
+  useEffect(() => {
+    if (name && currentView === "gettingStarted") {
+      setGettingStartedForm(prev => ({ ...prev, name }));
+    }
+  }, [name, currentView]);
+
   const currentBg = currentView === "login" ? loginBg : SignupBg;
 
   // Clear form data
@@ -109,18 +126,28 @@ export default function Auth() {
     setError("");
     setInfo("");
     setOtpValues(["", "", "", "", "", ""]);
+    setGettingStartedForm({
+      name: "",
+      gender: "",
+      dob: "",
+      height: "",
+      weight: "",
+      activity: "",
+    });
   };
 
   // Handle view changes
   const switchView = (view) => {
-    clearForm();
+    if (view !== "gettingStarted") {
+      clearForm();
+    }
     setCurrentView(view);
   };
 
   // OTP handling functions
   const handleOtpChange = (index, value) => {
     if (!/^\d*$/.test(value)) return;
-    
+
     const newOtp = [...otpValues];
     newOtp[index] = value;
     setOtpValues(newOtp);
@@ -156,6 +183,8 @@ export default function Auth() {
       await handleForgotPassword();
     } else if (currentView === "resetPassword") {
       await handleResetPassword();
+    } else if (currentView === "gettingStarted") {
+      await handleGettingStartedSubmit();
     }
   };
 
@@ -168,10 +197,22 @@ export default function Auth() {
     setLoading(true);
     try {
       const res = await axios.post(`${API}/signin`, { email, password });
-      const { token, name: userName } = res.data;
+      console.log(res);
+      const { token, name: userName, dob, height, weight } = res.data.user;
 
       localStorage.setItem("ayu_token", token);
-      localStorage.setItem("ayu_profile", JSON.stringify({ name: userName, email }));
+      localStorage.setItem(
+        "ayu_profile",
+        JSON.stringify({
+          name: userName,
+          email: email,
+          dob: dob ? new Date(dob).toISOString().split("T")[0] : "", // Convert timestamp to date
+          // gender: gender || "male",
+          height: height || "", // Ensure valid height
+          weight: weight || "", // Ensure valid weight
+        })
+      );
+
 
       navigate("/dashboard", { replace: true });
     } catch (err) {
@@ -194,13 +235,13 @@ export default function Auth() {
 
     setLoading(true);
     try {
-      const res = await axios.post(`${API}/signup`, { 
-        name, 
-        email, 
-        password, 
-        confirmPassword 
+      const res = await axios.post(`${API}/signup`, {
+        name,
+        email,
+        password,
+        confirmPassword
       });
-      
+
       setInfo("Account created! Please verify your email with the OTP sent.");
       setCooldown(60);
       setTimeout(() => setCurrentView("otp"), 1500);
@@ -225,8 +266,8 @@ export default function Auth() {
         otp: otpString,
       });
 
-      setInfo("Email verified successfully!");
-      setTimeout(() => setCurrentView("login"), 1500);
+      setInfo("Email verified successfully! Let's complete your profile.");
+      setTimeout(() => setCurrentView("gettingStarted"), 1500);
     } catch (err) {
       setError(err.response?.data?.message || "Invalid OTP. Please try again.");
     } finally {
@@ -283,6 +324,42 @@ export default function Auth() {
     }
   };
 
+  const handleGettingStartedSubmit = async () => {
+    const { name, gender, dob, height, weight } = gettingStartedForm;
+
+    if (!name || !gender || !dob || !height || !weight) {
+      setError("Please fill all required fields.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // First, get the user ID by finding the user with the email
+      const userResponse = await axios.get(`${API}/user/${encodeURIComponent(email)}`);
+      const userId = userResponse.data.user._id;
+
+      // Then update the profile
+      const response = await axios.put(
+        `${API}/updateprofile/${userId}`,
+        {
+          height: parseFloat(height),
+          weight: parseFloat(weight),
+          gender,
+          dob
+        }
+      );
+
+      if (response.status === 200) {
+        setInfo("Profile updated successfully! Redirecting to login...");
+        setTimeout(() => setCurrentView("login"), 1500);
+      }
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to update profile");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const resendOtp = async () => {
     if (sending || cooldown > 0) return;
 
@@ -292,11 +369,11 @@ export default function Auth() {
     try {
       if (currentView === "otp") {
         // Resend signup OTP
-        await axios.post(`${API}/signup`, { 
-          name, 
-          email, 
-          password, 
-          confirmPassword: password 
+        await axios.post(`${API}/signup`, {
+          name,
+          email,
+          password,
+          confirmPassword: password
         });
       } else if (currentView === "resetPassword") {
         // Resend forgot password OTP
@@ -312,8 +389,145 @@ export default function Auth() {
     }
   };
 
+  // Calculate age from date of birth
+  const calculateAge = (dob) => {
+    const today = new Date();
+    const birthDate = new Date(dob);
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+
+    return age;
+  };
+
   // Render different form content based on current view
   const renderFormContent = () => {
+    if (currentView === "gettingStarted") {
+      return (
+        <div className="w-full max-w-md">
+          <div className="flex items-start justify-between mb-6 gap-4">
+            <div>
+              <h2 className="text-3xl md:text-4xl font-extrabold text-gray-900">
+                Complete Your Profile
+              </h2>
+              <p className="mt-1 text-sm text-gray-600">
+                Help us personalize your Ayurveda experience with a few details.
+              </p>
+            </div>
+          </div>
+
+          <form className="space-y-4" onSubmit={handleSubmit} noValidate>
+            <ThemeInput
+              name="name"
+              placeholder="Full name"
+              value={gettingStartedForm.name}
+              onChange={(e) => setGettingStartedForm(prev => ({ ...prev, name: e.target.value }))}
+            />
+
+            <div>
+              <select
+                value={gettingStartedForm.gender}
+                onChange={(e) => setGettingStartedForm(prev => ({ ...prev, gender: e.target.value }))}
+                className="w-full px-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white text-gray-900"
+              >
+                <option value="">Select Gender</option>
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Date of Birth
+              </label>
+              <input
+                type="date"
+                value={gettingStartedForm.dob}
+                onChange={(e) => setGettingStartedForm(prev => ({ ...prev, dob: e.target.value }))}
+                className="w-full px-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white text-gray-900"
+                max={new Date().toISOString().split('T')[0]} // Prevent future dates
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <ThemeInput
+                  name="height"
+                  type="number"
+                  placeholder="Height (cm)"
+                  value={gettingStartedForm.height}
+                  onChange={(e) => setGettingStartedForm(prev => ({ ...prev, height: e.target.value }))}
+                  min="100"
+                  max="250"
+                />
+              </div>
+              <div>
+                <ThemeInput
+                  name="weight"
+                  type="number"
+                  placeholder="Weight (kg)"
+                  value={gettingStartedForm.weight}
+                  onChange={(e) => setGettingStartedForm(prev => ({ ...prev, weight: e.target.value }))}
+                  min="30"
+                  max="300"
+                />
+              </div>
+            </div>
+
+            <div>
+              <select
+                value={gettingStartedForm.activity}
+                onChange={(e) => setGettingStartedForm(prev => ({ ...prev, activity: e.target.value }))}
+                className="w-full px-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white text-gray-900"
+              >
+                <option value="">Activity Level (Optional)</option>
+                <option value="sedentary">Sedentary (little to no exercise)</option>
+                <option value="light">Light (exercise 1-3 days/week)</option>
+                <option value="moderate">Moderate (exercise 3-5 days/week)</option>
+                <option value="active">Active (exercise 6-7 days/week)</option>
+                <option value="very_active">Very Active (intense exercise daily)</option>
+              </select>
+            </div>
+
+            {error && <div className="text-sm text-red-500">{error}</div>}
+            {info && <div className="text-sm text-green-600">{info}</div>}
+
+            {/* Show calculated age if DOB is entered */}
+            {gettingStartedForm.dob && (
+              <div className="text-sm text-gray-600 bg-green-50 p-3 rounded-lg">
+                Age: {calculateAge(gettingStartedForm.dob)} years
+              </div>
+            )}
+
+            <div className="flex flex-col gap-3 mt-6">
+              <AyurvedaButton
+                type="submit"
+                className="w-full"
+                disabled={loading}
+              >
+                {loading ? "Saving Profile..." : "Complete Profile"}
+              </AyurvedaButton>
+            </div>
+
+            <div className="text-center text-sm text-gray-600 mt-3">
+              Want to fill this later?{" "}
+              <button
+                type="button"
+                onClick={() => setCurrentView("login")}
+                className="text-sm font-medium text-green-700 underline"
+              >
+                Go to Login
+              </button>
+            </div>
+          </form>
+        </div>
+      );
+    }
+
     if (currentView === "otp") {
       return (
         <div className="w-full max-w-md bg-white rounded-2xl shadow-lg border p-6">
@@ -384,8 +598,8 @@ export default function Auth() {
           </div>
 
           <div className="mt-4 text-center text-sm">
-            <button 
-              onClick={() => switchView("signup")} 
+            <button
+              onClick={() => switchView("signup")}
               className="text-green-700 underline"
             >
               Go back to signup
@@ -496,16 +710,16 @@ export default function Auth() {
         <div className="flex items-start justify-between mb-6 gap-4">
           <div>
             <h2 className="text-3xl md:text-4xl font-extrabold text-gray-900">
-              {currentView === "login" ? "Welcome back" : 
-               currentView === "signup" ? "Create an account" : 
-               "Forgot Password"}
+              {currentView === "login" ? "Welcome back" :
+                currentView === "signup" ? "Create an account" :
+                  "Forgot Password"}
             </h2>
             <p className="mt-1 text-sm text-gray-600">
-              {currentView === "login" 
+              {currentView === "login"
                 ? "Sign in to manage your treatments, bookings and follow-ups."
-                : currentView === "signup" 
-                ? "Create an account to save your plans and personalized programs."
-                : "Enter your email address to receive a password reset OTP."}
+                : currentView === "signup"
+                  ? "Create an account to save your plans and personalized programs."
+                  : "Enter your email address to receive a password reset OTP."}
             </p>
           </div>
         </div>
@@ -558,9 +772,9 @@ export default function Auth() {
               disabled={loading}
             >
               {loading
-                ? currentView === "login" ? "Signing in..." : 
+                ? currentView === "login" ? "Signing in..." :
                   currentView === "signup" ? "Creating..." : "Sending..."
-                : currentView === "login" ? "Sign in" : 
+                : currentView === "login" ? "Sign in" :
                   currentView === "signup" ? "Create account" : "Send Reset OTP"}
             </AyurvedaButton>
           </div>
@@ -578,16 +792,16 @@ export default function Auth() {
           )}
 
           <div className="text-center text-sm text-gray-600 mt-3">
-            {currentView === "login" ? "Don't have an account?" : 
-             currentView === "signup" ? "Already have an account?" : 
-             "Remember your password?"}{" "}
+            {currentView === "login" ? "Don't have an account?" :
+              currentView === "signup" ? "Already have an account?" :
+                "Remember your password?"}{" "}
             <button
               type="button"
               onClick={() => switchView(currentView === "login" ? "signup" : "login")}
               className="text-sm font-medium text-green-700 underline"
             >
-              {currentView === "login" ? "Sign up" : 
-               currentView === "signup" ? "Log in" : "Sign in"}
+              {currentView === "login" ? "Sign up" :
+                currentView === "signup" ? "Log in" : "Sign in"}
             </button>
           </div>
         </form>
@@ -595,7 +809,7 @@ export default function Auth() {
     );
   };
 
-  if (currentView === "otp") {
+  if (currentView === "otp" || currentView === "gettingStarted") {
     return (
       <main className="min-h-screen bg-[#f6faf5] flex items-center justify-center p-6">
         {renderFormContent()}

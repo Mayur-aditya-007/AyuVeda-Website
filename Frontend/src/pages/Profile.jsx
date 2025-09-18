@@ -202,12 +202,12 @@ export default function ProfilePage() {
 
                       <div>
                         <div className="text-xs text-gray-500">Height</div>
-                        <div className="text-gray-800">{user?.heightCm ? `${user.heightCm} cm` : "-"}</div>
+                        <div className="text-gray-800">{user?.height? `${user.height} cm` : "-"}</div>
                       </div>
 
                       <div>
                         <div className="text-xs text-gray-500">Weight</div>
-                        <div className="text-gray-800">{user?.weightKg ? `${user.weightKg} kg` : "-"}</div>
+                        <div className="text-gray-800">{user?.weight? `${user.weight} kg` : "-"}</div>
                       </div>
 
                       <div>

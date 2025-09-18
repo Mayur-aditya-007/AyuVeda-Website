@@ -42,8 +42,8 @@ export default function SettingsPage() {
     initials: "",
     gender: "",
     dob: "",
-    heightCm: "",
-    weightKg: "",
+    height: "",
+    weight: "",
     phone: "",
     location: "",
     notes: "",
@@ -199,8 +199,8 @@ export default function SettingsPage() {
       localStorage.setItem("ayu_profile", JSON.stringify(saveObj));
       const gettingStarted = {
         dob: profile.dob,
-        heightCm: profile.heightCm,
-        weightKg: profile.weightKg,
+        height: profile.height,
+        weight: profile.weight,
         activity: safeParse(localStorage.getItem("gettingStartedData"))?.activity || undefined,
       };
       localStorage.setItem("gettingStartedData", JSON.stringify(gettingStarted));
@@ -223,8 +223,8 @@ export default function SettingsPage() {
         initials: "",
         gender: "",
         dob: "",
-        heightCm: "",
-        weightKg: "",
+        height: "",
+        weight: "",
         phone: "",
         location: "",
         notes: "",
@@ -347,12 +347,12 @@ export default function SettingsPage() {
 
                 <div>
                   <label className="block text-xs text-gray-500">Height (cm)</label>
-                  <input type="number" value={profile.heightCm} onChange={(e) => setField("heightCm", e.target.value)} className="mt-1 w-full border border-gray-200 rounded-md p-2 text-sm" />
+                  <input type="number" value={profile.height} onChange={(e) => setField("heightCm", e.target.value)} className="mt-1 w-full border border-gray-200 rounded-md p-2 text-sm" />
                 </div>
 
                 <div>
                   <label className="block text-xs text-gray-500">Weight (kg)</label>
-                  <input type="number" value={profile.weightKg} onChange={(e) => setField("weightKg", e.target.value)} className="mt-1 w-full border border-gray-200 rounded-md p-2 text-sm" />
+                  <input type="number" value={profile.weight} onChange={(e) => setField("weightKg", e.target.value)} className="mt-1 w-full border border-gray-200 rounded-md p-2 text-sm" />
                 </div>
 
                 <div>
